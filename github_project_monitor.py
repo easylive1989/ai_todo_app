@@ -261,7 +261,7 @@ class GitHubProjectMonitor:
                 full_prompt = f"{prompt}\n\n完成後請自動 commit 並 push 變更到 Git 倉庫。"
             
             # 建立 Claude CLI 指令
-            cmd = [self.claude_cli, full_prompt]
+            cmd = [self.claude_cli, '--dangerously-skip-permissions', full_prompt]
             
             # 執行 Claude CLI
             process = subprocess.run(
