@@ -6,6 +6,7 @@ GitHub Project Item 監聽器
 
 import os
 import time
+import subprocess
 from datetime import datetime
 from typing import Set, Dict, Any
 import requests
@@ -46,6 +47,13 @@ class GitHubProjectMonitor:
         # 儲存已知的 item IDs
         self.known_items: Set[str] = set()
         self.first_run = True
+        
+        # Claude Code CLI 設定
+        self.claude_cli = os.getenv('CLAUDE_CLI_PATH', 'claude')
+        self.project_dir = os.getenv('PROJECT_DIR', os.getcwd())
+        
+        # Claude Code CLI 是否要求 commit
+        self.request_commit = os.getenv('REQUEST_COMMIT', 'true').lower() == 'true'
     
     def get_project_items(self) -> Dict[str, Any]:
         """
@@ -202,6 +210,21 @@ class GitHubProjectMonitor:
                         
                         print(f"   📅 創建時間: {item.get('createdAt', 'Unknown')}")
                         print("-" * 30)
+                        
+                        # 執行 Claude Code CLI
+                        task_content = self.extract_task_content(item)
+                        if task_content and task_content != "無法提取任務內容":
+                            print(f"\n🚀 開始執行任務...")
+                            
+                            # 執行 Claude Code (包含自動 commit/push)
+                            claude_success = self.run_claude_cli(task_content, item_id)
+                            
+                            if claude_success:
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎉 任務執行完成")
+                            else:
+                                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 😞 任務執行失敗")
+                        else:
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 無法提取有效的任務內容，跳過執行")
                 
                 # 更新已知的 items
                 self.known_items.update(new_item_ids)
@@ -212,6 +235,91 @@ class GitHubProjectMonitor:
         
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 錯誤: {str(e)}")
+    
+    def run_claude_cli(self, prompt: str, item_id: str) -> bool:
+        """
+        執行 Claude Code CLI
+        
+        Args:
+            prompt: 要執行的提示詞/任務內容
+            item_id: Item ID 用於 log
+        
+        Returns:
+            bool: 執行是否成功
+        """
+        try:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🤖 啟動 Claude Code CLI...")
+            print(f"   📝 執行內容: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
+            
+            # 切換到專案目錄
+            original_dir = os.getcwd()
+            os.chdir(self.project_dir)
+            
+            # 如果需要 commit，在提示詞中加入 commit 指令
+            full_prompt = prompt
+            if self.request_commit:
+                full_prompt = f"{prompt}\n\n完成後請自動 commit 並 push 變更到 Git 倉庫。"
+            
+            # 建立 Claude CLI 指令
+            cmd = [self.claude_cli, full_prompt]
+            
+            # 執行 Claude CLI
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 分鐘超時（給 commit/push 更多時間）
+            )
+            
+            # 回到原目錄
+            os.chdir(original_dir)
+            
+            if process.returncode == 0:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Claude Code 執行成功")
+                if process.stdout:
+                    print(f"   📤 輸出: {process.stdout.strip()[:200]}{'...' if len(process.stdout.strip()) > 200 else ''}")
+                return True
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Claude Code 執行失敗 (exit code: {process.returncode})")
+                if process.stderr:
+                    print(f"   📥 錯誤: {process.stderr.strip()}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⏰ Claude Code 執行超時")
+            return False
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 執行 Claude Code 時發生錯誤: {str(e)}")
+            return False
+    
+    
+    def extract_task_content(self, item: Dict[str, Any]) -> str:
+        """
+        提取 Item 的任務內容
+        
+        Args:
+            item: Project Item 數據
+        
+        Returns:
+            str: 任務內容
+        """
+        content = item.get('content', {})
+        
+        # 優先使用 title
+        title = content.get('title', '')
+        
+        # 如果有 body 內容，也加入
+        body = content.get('body', '')
+        
+        # 組合任務內容
+        if title and body:
+            return f"{title}\n\n{body}"
+        elif title:
+            return title
+        elif body:
+            return body
+        else:
+            return "無法提取任務內容"
     
     def start_monitoring(self, interval: int = 60):
         """
