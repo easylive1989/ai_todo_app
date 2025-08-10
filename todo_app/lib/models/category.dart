@@ -75,12 +75,17 @@ class Category {
   }
 
   factory Category.fromJson(Map<String, dynamic> json) {
-    return Category(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      color: Color(json['color'] as int),
-      icon: IconData(json['icon'] as int, fontFamily: 'MaterialIcons'),
+    // 根據 ID 查找預設分類而不是動態創建 IconData
+    final existingCategory = defaultCategories.firstWhere(
+      (cat) => cat.id == json['id'],
+      orElse: () => Category(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        color: Color(json['color'] as int),
+        icon: Icons.category, // 使用預設圖標
+      ),
     );
+    return existingCategory;
   }
 
   @override
