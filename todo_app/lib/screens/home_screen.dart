@@ -33,7 +33,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Todo App'),
+        title: const Text(
+          'Todo App',
+          style: TextStyle(color: Colors.blue),
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(120),
           child: Column(
