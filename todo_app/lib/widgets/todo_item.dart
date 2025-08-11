@@ -19,94 +19,159 @@ class TodoItem extends StatelessWidget {
         todo.dueDate!.isBefore(DateTime.now()) && 
         !isCompleted;
 
-    return Card(
-      child: ListTile(
-        leading: Checkbox(
-          value: isCompleted,
-          onChanged: (value) {
-            context.read<TodoProvider>().toggleTodoStatus(todo.id);
-          },
-        ),
-        title: Text(
-          todo.title,
-          style: TextStyle(
-            decoration: isCompleted ? TextDecoration.lineThrough : null,
-            color: isCompleted 
-                ? Theme.of(context).colorScheme.onSurface.withOpacity(0.6)
-                : null,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (todo.description != null && todo.description!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  todo.description!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isCompleted 
-                        ? Theme.of(context).colorScheme.onSurface.withOpacity(0.4)
-                        : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                  ),
+    return Dismissible(
+      key: Key(todo.id),
+      direction: DismissDirection.horizontal,
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.endToStart) {
+          // 左滑 - 顯示刪除確認對話框
+          return await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('刪除待辦事項'),
+              content: Text('確定要刪除「${todo.title}」嗎？'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
                 ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.red,
+                  ),
+                  child: const Text('刪除'),
+                ),
+              ],
+            ),
+          ) ?? false;
+        } else if (direction == DismissDirection.startToEnd) {
+          // 右滑 - 切換完成狀態
+          context.read<TodoProvider>().toggleTodoStatus(todo.id);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                isCompleted ? '已標記為未完成' : '已標記為完成',
               ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                // 分類標籤
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: category.color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: category.color.withOpacity(0.3),
-                      width: 1,
+              duration: const Duration(seconds: 2),
+              backgroundColor: Colors.green,
+            ),
+          );
+          return false; // 不要真的移除項目，只是改變狀態
+        }
+        return false;
+      },
+      onDismissed: (direction) {
+        if (direction == DismissDirection.endToStart) {
+          // 刪除待辦事項
+          context.read<TodoProvider>().deleteTodo(todo.id);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('待辦事項已刪除'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      },
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        decoration: BoxDecoration(
+          color: Colors.green,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            Icon(
+              isCompleted ? Icons.undo : Icons.done,
+              color: Colors.white,
+              size: 28,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isCompleted ? '標記為未完成' : '標記為完成',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.red,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              '刪除',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(width: 8),
+            Icon(
+              Icons.delete,
+              color: Colors.white,
+              size: 28,
+            ),
+          ],
+        ),
+      ),
+      child: Card(
+        child: ListTile(
+          leading: Checkbox(
+            value: isCompleted,
+            onChanged: (value) {
+              context.read<TodoProvider>().toggleTodoStatus(todo.id);
+            },
+          ),
+          title: Text(
+            todo.title,
+            style: TextStyle(
+              decoration: isCompleted ? TextDecoration.lineThrough : null,
+              color: isCompleted 
+                  ? Theme.of(context).colorScheme.onSurface.withOpacity(0.6)
+                  : null,
+            ),
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (todo.description != null && todo.description!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    todo.description!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isCompleted 
+                          ? Theme.of(context).colorScheme.onSurface.withOpacity(0.4)
+                          : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        category.icon,
-                        size: 12,
-                        color: category.color,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        category.name,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: category.color,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
-                const SizedBox(width: 8),
-                
-                // 優先級標籤
-                _buildPriorityChip(context, todo.priority),
-                
-                const Spacer(),
-                
-                // 到期時間
-                if (todo.dueDate != null)
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  // 分類標籤
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: isOverdue 
-                          ? Colors.red.withOpacity(0.1)
-                          : Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
+                      color: category.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isOverdue 
-                            ? Colors.red.withOpacity(0.3)
-                            : Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                        color: category.color.withOpacity(0.3),
                         width: 1,
                       ),
                     ),
@@ -114,35 +179,79 @@ class TodoItem extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          Icons.schedule,
-                          size: 10,
-                          color: isOverdue ? Colors.red : Theme.of(context).colorScheme.onSurface,
+                          category.icon,
+                          size: 12,
+                          color: category.color,
                         ),
-                        const SizedBox(width: 2),
+                        const SizedBox(width: 4),
                         Text(
-                          _formatDueDate(todo.dueDate!),
+                          category.name,
                           style: TextStyle(
-                            fontSize: 9,
-                            color: isOverdue ? Colors.red : Theme.of(context).colorScheme.onSurface,
+                            fontSize: 10,
+                            color: category.color,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
                     ),
                   ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 8),
+                  
+                  // 優先級標籤
+                  _buildPriorityChip(context, todo.priority),
+                  
+                  const Spacer(),
+                  
+                  // 到期時間
+                  if (todo.dueDate != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isOverdue 
+                            ? Colors.red.withOpacity(0.1)
+                            : Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isOverdue 
+                              ? Colors.red.withOpacity(0.3)
+                              : Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.schedule,
+                            size: 10,
+                            color: isOverdue ? Colors.red : Theme.of(context).colorScheme.onSurface,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            _formatDueDate(todo.dueDate!),
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: isOverdue ? Colors.red : Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => AddTodoScreen(todoToEdit: todo),
+              ),
+            );
+          },
+          onLongPress: () {
+            _showOptionsBottomSheet(context, todo);
+          },
         ),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => AddTodoScreen(todoToEdit: todo),
-            ),
-          );
-        },
-        onLongPress: () {
-          _showOptionsBottomSheet(context, todo);
-        },
       ),
     );
   }
