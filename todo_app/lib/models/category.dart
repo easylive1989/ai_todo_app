@@ -51,6 +51,12 @@ class Category {
       icon: Icons.account_balance_wallet,
     ),
     Category(
+      id: 'sports',
+      name: '運動',
+      color: Colors.amber,
+      icon: Icons.sports_basketball,
+    ),
+    Category(
       id: 'other',
       name: '其他',
       color: Colors.grey,
