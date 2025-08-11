@@ -15,9 +15,12 @@ class TodoItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final category = Category.findById(todo.category);
     final isCompleted = todo.status == TodoStatus.completed;
+    final isCancelled = todo.status == TodoStatus.cancelled;
+    final isInProgress = todo.status == TodoStatus.inProgress;
+    final isPending = todo.status == TodoStatus.pending;
     final isOverdue = todo.dueDate != null && 
         todo.dueDate!.isBefore(DateTime.now()) && 
-        !isCompleted;
+        !isCompleted && !isCancelled;
 
     return Dismissible(
       key: Key(todo.id),
@@ -46,15 +49,27 @@ class TodoItem extends StatelessWidget {
             ),
           ) ?? false;
         } else if (direction == DismissDirection.startToEnd) {
-          // 右滑 - 切換完成狀態
-          context.read<TodoProvider>().toggleTodoStatus(todo.id);
+          // 右滑 - 切換到下一個狀態
+          String nextStatusText = '';
+          if (isPending) {
+            context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.inProgress);
+            nextStatusText = '已標記為進行中';
+          } else if (isInProgress) {
+            context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.completed);
+            nextStatusText = '已標記為完成';
+          } else if (isCompleted) {
+            context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.pending);
+            nextStatusText = '已標記為待處理';
+          } else if (isCancelled) {
+            context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.pending);
+            nextStatusText = '已重新開啟';
+          }
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                isCompleted ? '已標記為未完成' : '已標記為完成',
-              ),
+              content: Text(nextStatusText),
               duration: const Duration(seconds: 2),
-              backgroundColor: Colors.green,
+              backgroundColor: _getStatusColor(todo.status),
             ),
           );
           return false; // 不要真的移除項目，只是改變狀態
@@ -84,13 +99,13 @@ class TodoItem extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
             Icon(
-              isCompleted ? Icons.undo : Icons.done,
+              _getNextStatusIcon(todo.status),
               color: Colors.white,
               size: 28,
             ),
             const SizedBox(width: 8),
             Text(
-              isCompleted ? '標記為未完成' : '標記為完成',
+              _getNextStatusText(todo.status),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -129,17 +144,12 @@ class TodoItem extends StatelessWidget {
       ),
       child: Card(
         child: ListTile(
-          leading: Checkbox(
-            value: isCompleted,
-            onChanged: (value) {
-              context.read<TodoProvider>().toggleTodoStatus(todo.id);
-            },
-          ),
+          leading: _buildStatusIndicator(context, todo.status),
           title: Text(
             todo.title,
             style: TextStyle(
-              decoration: isCompleted ? TextDecoration.lineThrough : null,
-              color: isCompleted 
+              decoration: (isCompleted || isCancelled) ? TextDecoration.lineThrough : null,
+              color: (isCompleted || isCancelled)
                   ? Theme.of(context).colorScheme.onSurface.withOpacity(0.6)
                   : null,
             ),
@@ -155,7 +165,7 @@ class TodoItem extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isCompleted 
+                      color: (isCompleted || isCancelled)
                           ? Theme.of(context).colorScheme.onSurface.withOpacity(0.4)
                           : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                     ),
@@ -327,18 +337,33 @@ class TodoItem extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          ListTile(
-            leading: Icon(
-              todo.status == TodoStatus.completed ? Icons.undo : Icons.done,
+          if (todo.status != TodoStatus.cancelled)
+            ListTile(
+              leading: Icon(_getNextStatusIcon(todo.status)),
+              title: Text(_getNextStatusText(todo.status)),
+              onTap: () {
+                Navigator.pop(context);
+                _moveToNextStatus(context, todo);
+              },
             ),
-            title: Text(
-              todo.status == TodoStatus.completed ? '標記為未完成' : '標記為已完成',
+          if (todo.status != TodoStatus.cancelled)
+            ListTile(
+              leading: const Icon(Icons.cancel, color: Colors.orange),
+              title: const Text('取消'),
+              onTap: () {
+                Navigator.pop(context);
+                context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.cancelled);
+              },
             ),
-            onTap: () {
-              Navigator.pop(context);
-              context.read<TodoProvider>().toggleTodoStatus(todo.id);
-            },
-          ),
+          if (todo.status == TodoStatus.cancelled)
+            ListTile(
+              leading: const Icon(Icons.restart_alt, color: Colors.blue),
+              title: const Text('重新開啟'),
+              onTap: () {
+                Navigator.pop(context);
+                context.read<TodoProvider>().updateTodoStatus(todo.id, TodoStatus.pending);
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.edit),
             title: const Text('編輯'),
@@ -395,5 +420,92 @@ class TodoItem extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildStatusIndicator(BuildContext context, TodoStatus status) {
+    IconData icon;
+    Color color;
+    
+    switch (status) {
+      case TodoStatus.pending:
+        icon = Icons.radio_button_unchecked;
+        color = Theme.of(context).colorScheme.outline;
+        break;
+      case TodoStatus.inProgress:
+        icon = Icons.play_circle_outline;
+        color = Colors.blue;
+        break;
+      case TodoStatus.completed:
+        icon = Icons.check_circle;
+        color = Colors.green;
+        break;
+      case TodoStatus.cancelled:
+        icon = Icons.cancel;
+        color = Colors.grey;
+        break;
+    }
+    
+    return IconButton(
+      icon: Icon(icon, color: color),
+      onPressed: () => _moveToNextStatus(context, todo),
+    );
+  }
+
+  IconData _getNextStatusIcon(TodoStatus status) {
+    switch (status) {
+      case TodoStatus.pending:
+        return Icons.play_circle_outline;
+      case TodoStatus.inProgress:
+        return Icons.check_circle;
+      case TodoStatus.completed:
+        return Icons.radio_button_unchecked;
+      case TodoStatus.cancelled:
+        return Icons.restart_alt;
+    }
+  }
+
+  String _getNextStatusText(TodoStatus status) {
+    switch (status) {
+      case TodoStatus.pending:
+        return '開始進行';
+      case TodoStatus.inProgress:
+        return '標記完成';
+      case TodoStatus.completed:
+        return '重新開啟';
+      case TodoStatus.cancelled:
+        return '重新開啟';
+    }
+  }
+
+  Color _getStatusColor(TodoStatus status) {
+    switch (status) {
+      case TodoStatus.pending:
+        return Colors.orange;
+      case TodoStatus.inProgress:
+        return Colors.blue;
+      case TodoStatus.completed:
+        return Colors.green;
+      case TodoStatus.cancelled:
+        return Colors.grey;
+    }
+  }
+
+  void _moveToNextStatus(BuildContext context, Todo todo) {
+    TodoStatus nextStatus;
+    switch (todo.status) {
+      case TodoStatus.pending:
+        nextStatus = TodoStatus.inProgress;
+        break;
+      case TodoStatus.inProgress:
+        nextStatus = TodoStatus.completed;
+        break;
+      case TodoStatus.completed:
+        nextStatus = TodoStatus.pending;
+        break;
+      case TodoStatus.cancelled:
+        nextStatus = TodoStatus.pending;
+        break;
+    }
+    context.read<TodoProvider>().updateTodoStatus(todo.id, nextStatus);
   }
 }

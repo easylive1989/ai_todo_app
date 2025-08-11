@@ -22,11 +22,16 @@ class TodoProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
 
   List<Todo> get pendingTodos => _todos.where((todo) => todo.status == TodoStatus.pending).toList();
+  List<Todo> get inProgressTodos => _todos.where((todo) => todo.status == TodoStatus.inProgress).toList();
   List<Todo> get completedTodos => _todos.where((todo) => todo.status == TodoStatus.completed).toList();
+  List<Todo> get cancelledTodos => _todos.where((todo) => todo.status == TodoStatus.cancelled).toList();
 
   int get totalTodos => _todos.length;
   int get pendingCount => pendingTodos.length;
+  int get inProgressCount => inProgressTodos.length;
   int get completedCount => completedTodos.length;
+  int get cancelledCount => cancelledTodos.length;
+  int get activeCount => pendingCount + inProgressCount;
   double get completionRate => totalTodos == 0 ? 0.0 : completedCount / totalTodos;
 
   List<Todo> _getFilteredTodos() {
@@ -46,10 +51,17 @@ class TodoProvider with ChangeNotifier {
       }).toList();
     }
 
-    // 排序：未完成在前，按優先級和創建時間排序
+    // 排序：按狀態優先級排序（進行中 > 待處理 > 已完成 > 已取消）
     filtered.sort((a, b) {
       if (a.status != b.status) {
-        return a.status == TodoStatus.pending ? -1 : 1;
+        // 狀態優先級排序
+        const statusOrder = {
+          TodoStatus.inProgress: 0,
+          TodoStatus.pending: 1,
+          TodoStatus.completed: 2,
+          TodoStatus.cancelled: 3,
+        };
+        return statusOrder[a.status]!.compareTo(statusOrder[b.status]!);
       }
       
       if (a.priority != b.priority) {
@@ -154,6 +166,36 @@ class TodoProvider with ChangeNotifier {
     return false;
   }
 
+  Future<bool> updateTodoStatus(String id, TodoStatus newStatus) async {
+    try {
+      final index = _todos.indexWhere((todo) => todo.id == id);
+      if (index != -1) {
+        final currentTodo = _todos[index];
+        
+        final DateTime? completedAt = newStatus == TodoStatus.completed
+            ? DateTime.now()
+            : (currentTodo.status == TodoStatus.completed && newStatus != TodoStatus.completed)
+                ? null
+                : currentTodo.completedAt;
+                
+        final updatedTodo = currentTodo.copyWith(
+          status: newStatus,
+          completedAt: completedAt,
+        );
+        
+        final success = await _todoService.updateTodo(updatedTodo);
+        if (success) {
+          _todos[index] = updatedTodo;
+          notifyListeners();
+          return true;
+        }
+      }
+    } catch (e) {
+      print('Error updating todo status: $e');
+    }
+    return false;
+  }
+
   void setSelectedCategory(String categoryId) {
     if (_selectedCategoryId != categoryId) {
       _selectedCategoryId = categoryId;
@@ -194,9 +236,9 @@ class TodoProvider with ChangeNotifier {
       counts[category.id] = 0;
     }
     
-    // 計算每個分類的待辦事項數量
+    // 計算每個分類的活躍待辦事項數量（待處理和進行中）
     for (final todo in _todos) {
-      if (todo.status == TodoStatus.pending) {
+      if (todo.status == TodoStatus.pending || todo.status == TodoStatus.inProgress) {
         counts[todo.category] = (counts[todo.category] ?? 0) + 1;
       }
     }
@@ -219,7 +261,9 @@ class TodoProvider with ChangeNotifier {
     final now = DateTime.now();
     
     return _todos.where((todo) {
-      if (todo.dueDate == null || todo.status == TodoStatus.completed) return false;
+      if (todo.dueDate == null || 
+          todo.status == TodoStatus.completed ||
+          todo.status == TodoStatus.cancelled) return false;
       return todo.dueDate!.isBefore(now);
     }).toList();
   }

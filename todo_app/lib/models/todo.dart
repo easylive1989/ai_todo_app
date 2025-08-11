@@ -1,6 +1,6 @@
 enum Priority { low, medium, high }
 
-enum TodoStatus { pending, completed }
+enum TodoStatus { pending, inProgress, completed, cancelled }
 
 class Todo {
   final String id;
