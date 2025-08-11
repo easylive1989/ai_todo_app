@@ -54,6 +54,9 @@ class GitHubProjectMonitor:
         
         # Claude Code CLI 是否要求 commit
         self.request_commit = os.getenv('REQUEST_COMMIT', 'true').lower() == 'true'
+        
+        # Discord webhook URL
+        self.discord_webhook_url = 'https://discord.com/api/webhooks/1404465505888108664/GBq0HXWkrAOwGPE2yEprpZxiAbj6D3oaHs9qQTSSYNhDXLrS06CS2HErQojYj1nE8ozt'
     
     def get_project_items(self) -> Dict[str, Any]:
         """
@@ -216,8 +219,8 @@ class GitHubProjectMonitor:
                         if task_content and task_content != "無法提取任務內容":
                             print(f"\n🚀 開始執行任務...")
                             
-                            # 執行 Claude Code (包含自動 commit/push)
-                            claude_success = self.run_claude_cli(task_content, item_id)
+                            # 執行 Claude Code (包含自動 commit/push 和 Discord 通知)
+                            claude_success = self.run_claude_cli(task_content, item_id, item)
                             
                             if claude_success:
                                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎉 任務執行完成")
@@ -236,17 +239,108 @@ class GitHubProjectMonitor:
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 錯誤: {str(e)}")
     
-    def run_claude_cli(self, prompt: str, item_id: str) -> bool:
+    def send_discord_notification(self, item: Dict[str, Any], success: bool, execution_time: str = None):
+        """
+        發送 Discord 通知
+        
+        Args:
+            item: Project Item 數據
+            success: 執行是否成功
+            execution_time: 執行時間（可選）
+        """
+        try:
+            content = item.get('content', {})
+            title = content.get('title', '無標題')
+            item_type = 'Issue'
+            
+            if content:
+                if 'number' in content:
+                    item_type = 'Issue' if 'pull_request' not in content.get('url', '') else 'Pull Request'
+                else:
+                    item_type = 'Draft Issue'
+            
+            # 建立 Discord Embed
+            embed = {
+                "title": f"✅ 任務執行{'成功' if success else '失敗'}",
+                "description": f"**{item_type}:** {title}",
+                "color": 0x00ff00 if success else 0xff0000,  # 綠色(成功) 或 紅色(失敗)
+                "fields": [],
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {
+                    "text": f"GitHub Project Monitor - {self.owner}/{self.repo}"
+                }
+            }
+            
+            # 加入額外資訊
+            if 'number' in content:
+                embed["fields"].append({
+                    "name": "編號",
+                    "value": f"#{content.get('number')}",
+                    "inline": True
+                })
+                embed["fields"].append({
+                    "name": "狀態",
+                    "value": content.get('state', 'unknown'),
+                    "inline": True
+                })
+                if content.get('url'):
+                    embed["fields"].append({
+                        "name": "連結",
+                        "value": f"[查看 {item_type}]({content.get('url')})",
+                        "inline": False
+                    })
+            
+            if execution_time:
+                embed["fields"].append({
+                    "name": "執行時間",
+                    "value": execution_time,
+                    "inline": True
+                })
+            
+            # 如果有 body，加入預覽
+            if 'body' in content and content.get('body'):
+                body_preview = content.get('body', '')[:200]
+                embed["fields"].append({
+                    "name": "內容預覽",
+                    "value": f"{body_preview}{'...' if len(content.get('body', '')) > 200 else ''}",
+                    "inline": False
+                })
+            
+            # 準備 Discord webhook payload
+            payload = {
+                "embeds": [embed],
+                "username": "GitHub Project Monitor",
+                "avatar_url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+            }
+            
+            # 發送到 Discord
+            response = requests.post(
+                self.discord_webhook_url,
+                json=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code in [200, 204]:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📨 Discord 通知已發送")
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ Discord 通知發送失敗: {response.status_code}")
+                
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 發送 Discord 通知時發生錯誤: {str(e)}")
+    
+    def run_claude_cli(self, prompt: str, item_id: str, item: Dict[str, Any] = None) -> bool:
         """
         執行 Claude Code CLI
         
         Args:
             prompt: 要執行的提示詞/任務內容
             item_id: Item ID 用於 log
+            item: Project Item 數據（用於發送通知）
         
         Returns:
             bool: 執行是否成功
         """
+        start_time = datetime.now()
         try:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🤖 啟動 Claude Code CLI...")
             print(f"   📝 執行內容: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
@@ -274,22 +368,46 @@ class GitHubProjectMonitor:
             # 回到原目錄
             os.chdir(original_dir)
             
+            # 計算執行時間
+            execution_time = str(datetime.now() - start_time).split('.')[0]
+            
             if process.returncode == 0:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Claude Code 執行成功")
                 if process.stdout:
                     print(f"   📤 輸出: {process.stdout.strip()[:200]}{'...' if len(process.stdout.strip()) > 200 else ''}")
+                
+                # 發送 Discord 通知（成功）
+                if item:
+                    self.send_discord_notification(item, success=True, execution_time=execution_time)
+                
                 return True
             else:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Claude Code 執行失敗 (exit code: {process.returncode})")
                 if process.stderr:
                     print(f"   📥 錯誤: {process.stderr.strip()}")
+                
+                # 發送 Discord 通知（失敗）
+                if item:
+                    self.send_discord_notification(item, success=False, execution_time=execution_time)
+                
                 return False
                 
         except subprocess.TimeoutExpired:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⏰ Claude Code 執行超時")
+            
+            # 發送 Discord 通知（超時/失敗）
+            if item:
+                execution_time = "超過 10 分鐘（超時）"
+                self.send_discord_notification(item, success=False, execution_time=execution_time)
+            
             return False
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 執行 Claude Code 時發生錯誤: {str(e)}")
+            
+            # 發送 Discord 通知（錯誤/失敗）
+            if item:
+                self.send_discord_notification(item, success=False, execution_time="執行時發生錯誤")
+            
             return False
     
     
