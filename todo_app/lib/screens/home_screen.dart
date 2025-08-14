@@ -35,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       appBar: AppBar(
         title: const Text(
           'Todo App',
-          style: TextStyle(color: Colors.blue),
+          style: TextStyle(color: Colors.orange),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(120),
@@ -122,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     Text(
                       'Todo App',
                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onPrimary,
+                        color: Colors.orange,
                       ),
                     ),
                     const SizedBox(height: 8),
