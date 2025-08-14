@@ -57,6 +57,12 @@ class Category {
       icon: Icons.sports_basketball,
     ),
     Category(
+      id: 'entertainment',
+      name: '娛樂',
+      color: Colors.pink,
+      icon: Icons.movie,
+    ),
+    Category(
       id: 'other',
       name: '其他',
       color: Colors.grey,
