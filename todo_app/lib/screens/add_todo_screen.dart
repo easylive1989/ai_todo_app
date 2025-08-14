@@ -57,7 +57,10 @@ class _AddTodoScreenState extends State<AddTodoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEditing ? '編輯待辦事項' : '新增待辦事項'),
+        title: Text(
+          isEditing ? '編輯待辦事項' : '新增待辦事項',
+          style: const TextStyle(color: Colors.orange),
+        ),
         actions: [
           if (isEditing)
             IconButton(
