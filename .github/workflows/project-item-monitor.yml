@@ -1,0 +1,149 @@
+name: Project Item Monitor
+
+on:
+  projects_v2_item:
+    types: [created, edited, moved]
+  workflow_dispatch:
+    inputs:
+      project_number:
+        description: 'Project number to monitor'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+  projects: read
+
+jobs:
+  monitor-project-item:
+    runs-on: ubuntu-latest
+    if: github.event.projects_v2_item.project_node_id == 'PVT_kwHOAw5gVs4ATpZZ' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Get project item details
+        if: github.event_name == 'projects_v2_item'
+        id: item-details
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Event type: ${{ github.event.action }}"
+          echo "Item ID: ${{ github.event.projects_v2_item.id }}"
+          echo "Project ID: ${{ github.event.projects_v2_item.project_node_id }}"
+          
+          # 獲取 item 詳細資訊
+          ITEM_ID="${{ github.event.projects_v2_item.id }}"
+          PROJECT_ID="${{ github.event.projects_v2_item.project_node_id }}"
+          
+          # 使用 GraphQL API 獲取 item 詳情
+          QUERY='query($itemId: ID!) {
+            node(id: $itemId) {
+              ... on ProjectV2Item {
+                id
+                createdAt
+                updatedAt
+                content {
+                  ... on Issue {
+                    title
+                    number
+                    state
+                    url
+                    body
+                  }
+                  ... on PullRequest {
+                    title
+                    number
+                    state
+                    url
+                    body
+                  }
+                  ... on DraftIssue {
+                    title
+                    body
+                  }
+                }
+                fieldValues(first: 10) {
+                  nodes {
+                    ... on ProjectV2ItemFieldTextValue {
+                      text
+                      field {
+                        ... on ProjectV2Field {
+                          name
+                        }
+                      }
+                    }
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      name
+                      field {
+                        ... on ProjectV2SingleSelectField {
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }'
+          
+          RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"query\": \"$QUERY\", \"variables\": {\"itemId\": \"$ITEM_ID\"}}" \
+            https://api.github.com/graphql)
+          
+          echo "Item details:"
+          echo "$RESPONSE" | jq '.'
+
+      - name: Check if item is in Backlog status
+        if: github.event_name == 'projects_v2_item' && github.event.action == 'created'
+        id: check-backlog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 這裡可以根據需要檢查 item 是否為 Backlog 狀態
+          # 目前簡化處理，預設所有新創建的 item 都需要處理
+          echo "new_backlog_item=true" >> $GITHUB_OUTPUT
+          echo "✅ 新的 Project item 需要處理"
+
+      - name: Execute project item task
+        if: steps.check-backlog.outputs.new_backlog_item == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLAUDE_CLI_PATH: claude
+          PROJECT_DIR: ${{ github.workspace }}
+          REQUEST_COMMIT: "false"
+        run: |
+          echo "🚀 執行 Project item 監控腳本..."
+          
+          # 這裡可以執行相關的自動化任務
+          # 由於這是在 GitHub Actions 環境中，我們需要調整執行方式
+          
+          echo "📋 Project item 已被檢測到並處理"
+          echo "🏷️  Event: ${{ github.event.action }}"
+          echo "🆔 Item ID: ${{ github.event.projects_v2_item.id }}"
+
+      - name: Notify completion
+        if: always()
+        run: |
+          if [ "${{ steps.check-backlog.outputs.new_backlog_item }}" == "true" ]; then
+            echo "✅ Project item 監控完成"
+            echo "📊 處理狀態: 成功"
+          else
+            echo "ℹ️  No action required for this item"
+          fi

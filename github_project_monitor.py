@@ -57,6 +57,163 @@ class GitHubProjectMonitor:
         
         # Discord webhook URL
         self.discord_webhook_url = 'https://discord.com/api/webhooks/1404465505888108664/GBq0HXWkrAOwGPE2yEprpZxiAbj6D3oaHs9qQTSSYNhDXLrS06CS2HErQojYj1nE8ozt'
+        
+        # Project 欄位資訊（將在初始化時獲取）
+        self.project_id = None
+        self.status_field_id = None
+        self.review_option_id = None
+        self.backlog_option_id = None
+        
+        # 初始化時獲取 Project 欄位資訊
+        self._initialize_project_fields()
+    
+    def _initialize_project_fields(self):
+        """
+        初始化 Project 欄位資訊，獲取 Status 欄位和各狀態選項的 ID
+        """
+        try:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔄 正在獲取 Project 欄位資訊...")
+            
+            query = """
+            query($owner: String!, $repo: String!, $projectNumber: Int!) {
+              repository(owner: $owner, name: $repo) {
+                projectV2(number: $projectNumber) {
+                  id
+                  fields(first: 20) {
+                    nodes {
+                      ... on ProjectV2Field {
+                        id
+                        name
+                      }
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                        options {
+                          id
+                          name
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            
+            variables = {
+                'owner': self.owner,
+                'repo': self.repo,
+                'projectNumber': self.project_number
+            }
+            
+            response = requests.post(
+                self.graphql_url,
+                headers=self.headers,
+                json={'query': query, 'variables': variables}
+            )
+            
+            if response.status_code != 200:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 無法獲取 Project 欄位資訊: {response.status_code}")
+                return
+            
+            data = response.json()
+            
+            if 'errors' in data:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 獲取欄位資訊時發生錯誤: {data['errors']}")
+                return
+            
+            project = data.get('data', {}).get('repository', {}).get('projectV2', {})
+            self.project_id = project.get('id')
+            
+            # 尋找 Status 欄位和選項
+            for field in project.get('fields', {}).get('nodes', []):
+                if field and field.get('name') == 'Status':
+                    self.status_field_id = field.get('id')
+                    options = field.get('options', [])
+                    for option in options:
+                        if option.get('name') == 'Review':
+                            self.review_option_id = option.get('id')
+                        elif option.get('name') == 'Backlog':
+                            self.backlog_option_id = option.get('id')
+            
+            if self.project_id and self.status_field_id and self.review_option_id and self.backlog_option_id:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ 成功獲取 Project 欄位資訊")
+                print(f"   📋 Project ID: {self.project_id[:10]}...")
+                print(f"   📊 Status Field ID: {self.status_field_id[:10]}...")
+                print(f"   🔍 Review Option ID: {self.review_option_id[:10]}...")
+                print(f"   📝 Backlog Option ID: {self.backlog_option_id[:10]}...")
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 無法找到 Status 欄位或必要的選項 (Review/Backlog)")
+                
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 初始化 Project 欄位時發生錯誤: {str(e)}")
+    
+    def update_item_status(self, item_id: str, status: str = 'Review') -> bool:
+        """
+        更新 Project Item 的狀態
+        
+        Args:
+            item_id: Project Item 的 ID
+            status: 要設定的狀態（預設為 'Review'）
+        
+        Returns:
+            bool: 更新是否成功
+        """
+        if not all([self.project_id, self.status_field_id, self.review_option_id]):
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 缺少必要的 Project 欄位資訊，無法更新狀態")
+            return False
+        
+        try:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📝 正在更新 Item 狀態為 {status}...")
+            
+            mutation = """
+            mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+              updateProjectV2ItemFieldValue(
+                input: {
+                  projectId: $projectId
+                  itemId: $itemId
+                  fieldId: $fieldId
+                  value: {
+                    singleSelectOptionId: $optionId
+                  }
+                }
+              ) {
+                projectV2Item {
+                  id
+                }
+              }
+            }
+            """
+            
+            variables = {
+                'projectId': self.project_id,
+                'itemId': item_id,
+                'fieldId': self.status_field_id,
+                'optionId': self.review_option_id
+            }
+            
+            response = requests.post(
+                self.graphql_url,
+                headers=self.headers,
+                json={'query': mutation, 'variables': variables}
+            )
+            
+            if response.status_code != 200:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 更新狀態失敗: {response.status_code}")
+                return False
+            
+            data = response.json()
+            
+            if 'errors' in data:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 更新狀態時發生錯誤: {data['errors']}")
+                return False
+            
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ 成功將 Item 狀態更新為 {status}")
+            return True
+            
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 更新狀態時發生錯誤: {str(e)}")
+            return False
     
     def get_project_items(self) -> Dict[str, Any]:
         """
@@ -102,6 +259,7 @@ class GitHubProjectMonitor:
                       }
                       ... on ProjectV2ItemFieldSingleSelectValue {
                         name
+                        optionId
                         field {
                           ... on ProjectV2SingleSelectField {
                             name
@@ -140,6 +298,30 @@ class GitHubProjectMonitor:
         
         return data.get('data', {}).get('repository', {}).get('projectV2', {})
     
+    def _is_item_in_backlog(self, item: Dict[str, Any]) -> bool:
+        """
+        檢查 item 是否處於 Backlog 狀態
+        
+        Args:
+            item: Project Item 數據
+        
+        Returns:
+            bool: 是否為 Backlog 狀態
+        """
+        if not self.backlog_option_id:
+            # 如果沒有 Backlog ID，預設允許所有 item（向後相容）
+            return True
+        
+        field_values = item.get('fieldValues', {}).get('nodes', [])
+        for field in field_values:
+            if field and field.get('field', {}).get('name') == 'Status':
+                # 檢查選項 ID 是否匹配
+                option_id = field.get('optionId')
+                return option_id == self.backlog_option_id
+        
+        # 如果沒有找到狀態欄位，預設為 True（可能是新創建的 item）
+        return True
+    
     def check_for_new_items(self):
         """
         檢查是否有新的 Items 被創建
@@ -160,6 +342,7 @@ class GitHubProjectMonitor:
                 project_title = project_data.get('title', 'Unknown')
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 開始監聽 Project: {project_title}")
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 📊 目前有 {len(self.known_items)} 個 items")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎯 只監聽 Backlog 狀態的新任務")
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⏰ 每 60 秒檢查一次新的 items")
                 print("-" * 50)
                 self.first_run = False
@@ -168,11 +351,20 @@ class GitHubProjectMonitor:
             # 檢查新的 items
             new_item_ids = set(current_items.keys()) - self.known_items
             
-            if new_item_ids:
-                print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🆕 發現 {len(new_item_ids)} 個新的 Item!")
+            # 過濾出只有 Backlog 狀態的新 items
+            backlog_new_items = []
+            for item_id in new_item_ids:
+                item = current_items[item_id]
+                if self._is_item_in_backlog(item):
+                    backlog_new_items.append(item_id)
+            
+            if backlog_new_items:
+                print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🆕 發現 {len(backlog_new_items)} 個新的 Backlog Item!")
+                if len(new_item_ids) > len(backlog_new_items):
+                    print(f"   ℹ️ （忽略了 {len(new_item_ids) - len(backlog_new_items)} 個非 Backlog 狀態的 items）")
                 print("=" * 50)
                 
-                for item_id in new_item_ids:
+                for item_id in backlog_new_items:
                     item = current_items[item_id]
                     content = item.get('content', {})
                     
@@ -229,17 +421,20 @@ class GitHubProjectMonitor:
                         else:
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 無法提取有效的任務內容，跳過執行")
                 
-                # 更新已知的 items
+                # 更新已知的 items（包括所有新 items，不只是 Backlog）
                 self.known_items.update(new_item_ids)
                 print("=" * 50)
             else:
                 # 簡潔的狀態顯示
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 無新 items (共 {len(current_items)} 個)")
+                if new_item_ids:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 發現 {len(new_item_ids)} 個新 items，但都不是 Backlog 狀態")
+                else:
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ 無新 items (共 {len(current_items)} 個)")
         
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ 錯誤: {str(e)}")
     
-    def send_discord_notification(self, item: Dict[str, Any], success: bool, execution_time: str = None):
+    def send_discord_notification(self, item: Dict[str, Any], success: bool, execution_time: str = None, status_updated: bool = False):
         """
         發送 Discord 通知
         
@@ -247,6 +442,7 @@ class GitHubProjectMonitor:
             item: Project Item 數據
             success: 執行是否成功
             execution_time: 執行時間（可選）
+            status_updated: 狀態是否已更新為 Review
         """
         try:
             content = item.get('content', {})
@@ -260,8 +456,12 @@ class GitHubProjectMonitor:
                     item_type = 'Draft Issue'
             
             # 建立 Discord Embed
+            embed_title = f"✅ 任務執行{'成功' if success else '失敗'}"
+            if success and status_updated:
+                embed_title += " (狀態已更新為 Review)"
+            
             embed = {
-                "title": f"✅ 任務執行{'成功' if success else '失敗'}",
+                "title": embed_title,
                 "description": f"**{item_type}:** {title}",
                 "color": 0x00ff00 if success else 0xff0000,  # 綠色(成功) 或 紅色(失敗)
                 "fields": [],
@@ -294,6 +494,14 @@ class GitHubProjectMonitor:
                 embed["fields"].append({
                     "name": "執行時間",
                     "value": execution_time,
+                    "inline": True
+                })
+            
+            # 如果狀態已更新
+            if success and status_updated:
+                embed["fields"].append({
+                    "name": "Project 狀態",
+                    "value": "🔍 已更新為 Review",
                     "inline": True
                 })
             
@@ -376,9 +584,16 @@ class GitHubProjectMonitor:
                 if process.stdout:
                     print(f"   📤 輸出: {process.stdout.strip()[:200]}{'...' if len(process.stdout.strip()) > 200 else ''}")
                 
+                # 更新 Project Item 狀態為 Review
+                status_updated = False
+                if item_id:
+                    status_updated = self.update_item_status(item_id)
+                    if not status_updated:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ 無法更新 Item 狀態")
+                
                 # 發送 Discord 通知（成功）
                 if item:
-                    self.send_discord_notification(item, success=True, execution_time=execution_time)
+                    self.send_discord_notification(item, success=True, execution_time=execution_time, status_updated=status_updated)
                 
                 return True
             else:
